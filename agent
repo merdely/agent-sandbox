@@ -265,11 +265,12 @@ if ! podman image exists localhost/$progname:latest; then
 fi
 
 # Create directory for sandbox user data
-[[ ! -d "$HOME"/.local/share/"$progname" ]] && mkdir -p "$HOME"/.local/share/"$progname"
+[[ ! -d "$HOME"/.local/share/"$progname"/homes ]] && mkdir -p "$HOME"/.local/share/"$progname"/homes
+[[ ! -d "$HOME"/.local/share/"$progname"/homes/"$sandbox_name" ]] && mkdir -p "$HOME"/.local/share/"$progname"/homes/"$sandbox_name"
 
 # Set up meridian
-if [[ ! -e "$HOME"/.local/share/"$progname"/.bashrc ]]; then
-  cat <<'EOF' > "$HOME"/.local/share/"$progname"/.bashrc
+if [[ ! -e "$HOME"/.local/share/"$progname"/homes/"$sandbox_name".bashrc ]]; then
+  cat <<'EOF' > "$HOME"/.local/share/"$progname"/homes/"$sandbox_name".bashrc
   if [[ "$SANDBOX_AGENT" == opencode || "$SANDBOX_AGENT" == bash ]]; then
     export ANTHROPIC_API_KEY=x
     export ANTHROPIC_BASE_URL=http://127.0.0.1:3456
@@ -294,7 +295,7 @@ exec podman run -it --rm \
   --userns keep-id:uid="$(id -u)",gid="$(id -g)" \
   --security-opt no-new-privileges \
   -v "$workspace":/workspace \
-  -v "$HOME"/.local/share/"$progname":/home/node \
+  -v "$HOME"/.local/share/"$progname"/homes/"$sandbox_name":/home/node \
   -w /workspace \
   -e "SANDBOX_AGENT=$agent" \
   -e TERM=xterm-256color \
