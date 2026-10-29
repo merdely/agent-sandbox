@@ -246,11 +246,14 @@ fi
 
 # Set up meridian
 if [[ ! -e "$HOME"/.local/share/"$progname"/.bashrc ]]; then
-  {
-    printf 'export ANTHROPIC_API_KEY=x\n'
-    printf 'export ANTHROPIC_BASE_URL=http://127.0.0.1:3456\n'
-    printf 'pgrep -f "node (/usr(/local)?/bin/)?meridian" &>/dev/null || meridan &>/dev/null &\n'
-  } > "$HOME"/.local/share/"$progname"/.bashrc
+  cat <<EOF > "$HOME"/.local/share/"$progname"/.bashrc
+  if [[ "${AGENT:=claude}" == opencode || "$AGENT" == bash ]]; then
+    export ANTHROPIC_API_KEY=x
+    export ANTHROPIC_BASE_URL=http://127.0.0.1:3456
+    pgrep -f "node (/usr(/local)?/bin/)?[m]eridian" &>/dev/null || setsid -f meridian &>/dev/null
+  fi
+EOF
+  sed -Ei 's/^ {2}//' "$HOME"/.local/share/"$progname"/.bashrc
 fi
 
 # Set up workspace directory (create if necessary)
