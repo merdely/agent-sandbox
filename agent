@@ -108,6 +108,29 @@ if $build_only; then
   exit
 fi
 
+# Set up workspace directory (create if necessary)
+workspace=$PWD
+if (( ! dashdash && $# > 0 )); then
+  if [[ ! -d "$1" ]]; then
+    echo "Creating workspace $1" >&2
+    if ! mkdir -p "$1"; then
+      exit 1
+    fi
+    if [[ ! -d "$1" ]]; then
+      echo "Error: Could not create workspace $1" >&2
+      exit 1
+    fi
+  fi
+  workspace=$(realpath -- "$1") || exit 1
+  shift
+  [[ "$1" == -- ]] && shift
+fi
+
+if [[ "$workspace" == "$HOME" ]]; then
+  read -rp "Warning: You are in $HOME; if this is intential, enter 'yes' in all caps: "
+  [[ "$REPLY" != "YES" ]] && exit 1
+fi
+
 # Verify $agent is in supported agents list
 if [[ " ${agents[*]} " != *" $agent "* ]]; then
   echo "Error: Agent must be one of ${agents[*]}" >&2
@@ -261,25 +284,7 @@ if [[ ! -e "$HOME"/.local/share/"$progname"/.bashrc ]]; then
     fi
   fi
 EOF
-  sed -Ei 's/^ {2}//' "$HOME"/.local/share/"$progname"/.bashrc
-fi
-
-# Set up workspace directory (create if necessary)
-workspace=$PWD
-if (( ! dashdash && $# > 0 )); then
-  if [[ ! -d "$1" ]]; then
-    echo "Creating workspace $1" >&2
-    if ! mkdir -p "$1"; then
-      exit 1
-    fi
-    if [[ ! -d "$1" ]]; then
-      echo "Error: Could not create workspace $1" >&2
-      exit 1
-    fi
-  fi
-  workspace=$(realpath -- "$1") || exit 1
-  shift
-  [[ "$1" == -- ]] && shift
+  sed -Ei 's/^ {2}//' "$HOME"/.local/share/"$progname"/homes/"$sandbox_name".bashrc
 fi
 
 exec podman run -it --rm \
