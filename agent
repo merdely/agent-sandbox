@@ -244,6 +244,15 @@ fi
 # Create directory for sandbox user data
 [[ ! -d "$HOME"/.local/share/"$progname" ]] && mkdir -p "$HOME"/.local/share/"$progname"
 
+# Set up meridian
+if [[ ! -e "$HOME"/.local/share/"$progname"/.bashrc ]]; then
+  {
+    printf 'export ANTHROPIC_API_KEY=x\n'
+    printf 'export ANTHROPIC_BASE_URL=http://127.0.0.1:3456\n'
+    printf 'pgrep -f "node (/usr(/local)?/bin/)?meridian" &>/dev/null || meridan &>/dev/null &\n'
+  } > "$HOME"/.local/share/"$progname"/.bashrc
+fi
+
 # Set up workspace directory (create if necessary)
 workspace=$PWD
 if (( ! dashdash && $# > 0 )); then
@@ -277,5 +286,5 @@ exec podman run -it --rm \
   -e https_proxy=http://192.0.2.2:3128 \
   -e no_proxy=localhost,127.0.0.1 \
   -e NODE_USE_ENV_PROXY=1 \
-  "$progname" "$agent" "$@"
+  "$progname" bash "-ic" 'exec "$@"' bash "$agent" "$@"
 
