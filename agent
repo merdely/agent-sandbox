@@ -34,7 +34,7 @@ build_container() {
       && rm -rf /var/lib/apt/lists/*
 
   RUN npm install -g \
-        npm@12.2.1 \
+        npm@12 \
         @anthropic-ai/claude-code \
         opencode-ai \
         @rynfar/meridian \
@@ -46,8 +46,9 @@ build_container() {
   ENV HOME=/home/node
   WORKDIR /workspace
 EOF
-  sed -i 's/^  //' "$builddir"/Containerfile
+  sed -i 's/^ {2}//' "$builddir"/Containerfile
   podman build -t "$progname" "$builddir"
+  podman prune -y > /dev/null
 
   # Clean up builddir
   rm -Rf -- "$builddir"
@@ -81,11 +82,12 @@ usage() {
 }
 
 agent=$default_agent
+build_only=false
 # shellcheck disable=2034
 while getopts ":hn:bcos" opt; do
   case $opt in
     n) sandbox_name=$OPTARG ;;
-    b) build_container ; exit ;;
+    b) build_only=true ;;
     c) agent=claude ;;
     o) agent=opencode ;;
     s) agent=bash ;;
@@ -99,6 +101,12 @@ dashdash=0
 (( OPTIND > 1 )) && [[ "${*:OPTIND-1:1}" == -- ]] && dashdash=1
 shift $(( OPTIND - 1 ))
 
+# Build the container and exit with -b
+if $build_only; then
+  build_container
+  exit
+fi
+
 # Verify $agent is in supported agents list
 if [[ " ${agents[*]} " != *" $agent "* ]]; then
   echo "Error: Agent must be one of ${agents[*]}" >&2
@@ -106,15 +114,15 @@ if [[ " ${agents[*]} " != *" $agent "* ]]; then
 fi
 
 # Verify podman networks exist
-if [[ "$(podman network ls --format ' {{ .Name }} ')" != *" $progname-internal "* ]]; then
+if ! podman network exists "$progname"-internal; then
   podman network create --internal --subnet 192.0.2.0/24 "$progname"-internal | grep -v "$progname"-internal
 fi
-if [[ "$(podman network ls --format ' {{ .Name }} ')" != *" $progname-egress "* ]]; then
+if ! podman network exists "$progname"-egress; then
   podman network create "$progname"-egress | grep -v "$progname"-egress
 fi
 
 # Setup squid container if necessary
-if [[ "$(podman ps --format ' {{ .Names }} ')" != *" $progname-squid "* ]]; then
+if ! podman container exists "$progname"-squid; then
   [[ ! -d "$HOME"/.config/"$progname" ]] && mkdir -p "$HOME"/.config/"$progname"
 
   if [[ ! -e "$HOME"/.config/"$progname"/squid.conf ]]; then
@@ -149,7 +157,7 @@ if [[ "$(podman ps --format ' {{ .Names }} ')" != *" $progname-squid "* ]]; then
     via off
     forwarded_for delete
 EOF
-    sed -i 's/^  //' "$HOME"/.config/"$progname"/squid.conf
+    sed -i 's/^ {4}//' "$HOME"/.config/"$progname"/squid.conf
     echo "Be sure to customize $HOME/.config/$progname/squid.conf"
     echo "Then restart squid with: podman restart $progname-squid"
   fi
@@ -218,9 +226,9 @@ EOF
 fi
 
 # Create podman image, if necessary
-if [[ "$(podman image ls --format ' {{ .Repository }}:{{ .Tag }} ')" != *" localhost/$progname:latest "* ]]; then
+if ! podman image exists localhost/$progname:latest; then
   build_container
-  if [[ "$(podman image ls --format ' {{ .Repository }}:{{ .Tag }} ')" != *" localhost/$progname:latest "* ]]; then
+  if ! podman image exists localhost/$progname:latest; then
     echo "Error: Could not build $progname podman image" >&2
     exit 1
   fi
@@ -253,14 +261,14 @@ exec podman run -it --rm \
   --network "$progname"-internal \
   --userns keep-id:uid="$(id -u)",gid="$(id -g)" \
   --security-opt no-new-privileges \
-  -v "${workspace:?workspace is not set}":/workspace \
+  -v "$workspace":/workspace \
   -v "$HOME"/.local/share/"$progname":/home/node \
   -w /workspace \
   -e TERM \
   -e HOME=/home/node \
-  -e HTTP_PROXY=http://192.0.2.2:3128 \
-  -e HTTPS_PROXY=http://192.0.2.2:3128 \
-  -e NO_PROXY=localhost,127.0.0.1 \
+  -e http_proxy=http://192.0.2.2:3128 \
+  -e https_proxy=http://192.0.2.2:3128 \
+  -e no_proxy=localhost,127.0.0.1 \
   -e NODE_USE_ENV_PROXY=1 \
   "$progname" "$agent" "$@"
 
