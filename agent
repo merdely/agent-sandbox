@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+
+export CONTAINERS_STORAGE_CONF=$HOME/.config/containers/storage.conf
+
+# Check prerequisites
+! command -v podman &>/dev/null && { echo "Error: podman required for this program" ; exit 1 ; }
+! command -v krun   &>/dev/null && { echo "Error: krun required for this program" ; exit 1 ; }
+! command -v crun   &>/dev/null && { echo "Error: crun required for this program" ; exit 1 ; }
+if [[ "$(crun --version)" != *LIBKRUN* ]]; then
+  echo "Error: crun not compiled with krun support" >&2
+  exit 1
+fi
+
+progname="agent-sandbox"
+agents=(claude opencode bash)
+usage() {
+  echo "usage: ${0##*/} [Options] [workspace] [-- agent_options]"
+  echo
+  echo "Options:"
+  echo "  -h         : this help text"
+  echo "  -c         : run with claude (default)"
+  echo "  -o         : run with opencode"
+  echo "  -s         : run bash shell in sandbox"
+  exit "${1:-0}"
+}
+
+agent=claude
+# shellcheck disable=2034
+while getopts ":hcos" opt; do
+  case $opt in
+    c) agent=claude ;;
+    o) agent=opencode ;;
+    s) agent=bash ;;
+    h) usage ;;
+    :) echo "-$OPTARG requires an argument" ; exit 1 ;;
+    \?) echo "Unknown option: -$OPTARG" ; exit 1 ;;
+  esac
+done
+shift $(( OPTIND - 1 ))
+
+# Verify $agent is in supported agents list
+if [[ " ${agents[*]} " != *" $agent "* ]]; then
+  echo "Error: Agent must be one of ${agents[*]}" >&2
+  exit 1
+fi
+
+TEMPDIR=$(mktemp -d)
+trap 'rm -Rf -- "$TEMPDIR"' EXIT
+trap 'exit 1' INT TERM
+
+# Verify podman networks exist
+if [[ "$(podman network ls --format ' {{ .Name }} ')" != *" $progname-internal "* ]]; then
+  podman network create --internal --subnet 192.0.2.0/24 "$progname"-internal | grep -v "$progname"-internal
+fi
+if [[ "$(podman network ls --format ' {{ .Name }} ')" != *" $progname-egress "* ]]; then
+  podman network create "$progname"-egress | grep -v "$progname"-egress
+fi
+
+# Setup squid container if necessary
+if [[ "$(podman ps --format ' {{ .Names }} ')" != *" $progname-squid "* ]]; then
+  [[ ! -d "$HOME"/.config/"$progname" ]] && mkdir -p "$HOME"/.config/"$progname"
+
+  if [[ ! -e "$HOME"/.config/"$progname"/squid.conf ]]; then
+    # squid.conf contents
+    cat <<EOF > "$HOME"/.config/"$progname"/squid.conf
+    # Add additional acls here (domains + subdomains must have leading dot)
+    # acl agent_https_allowed dstdomain SITE
+    # acl agent_https_allowed dstdomain .DOMAIN
+
+    acl agent_https_allowed dstdomain api.anthropic.com
+    acl agent_https_allowed dstdomain bridge.claudeusercontent.com
+    acl agent_https_allowed dstdomain claude.com
+    acl agent_https_allowed dstdomain code.claude.com
+    acl agent_https_allowed dstdomain downloads.claude.ai
+    acl agent_https_allowed dstdomain mcp-proxy.anthropic.com
+    acl agent_https_allowed dstdomain platform.claude.com
+    acl agent_https_allowed dstdomain registry.npmjs.org
+    acl agent_https_allowed dstdomain archive.ubuntu.com
+    acl agent_https_allowed dstdomain download.docker.com
+
+    acl agent_src src 192.0.2.0/24
+    acl SSL_ports port 443
+    acl CONNECT method CONNECT
+
+    http_access deny !agent_src
+    http_access deny CONNECT !SSL_ports
+    http_access allow CONNECT agent_https_allowed
+    http_access deny all
+
+    http_port 3128
+    cache deny all
+    via off
+    forwarded_for delete
+EOF
+    sed -i 's/^  //' "$HOME"/.config/"$progname"/squid.conf
+    echo "Be sure to customize $HOME/.config/$progname/squid.conf"
+    echo "Then restart squid with: podman restart $progname-squid"
+  fi
+
+  # Create systemd service for squid
+  [[ ! -d ~/.config/containers/systemd ]] && mkdir -p ~/.config/containers/systemd
+
+  # Create network definition for internal network
+  if [[ ! -e "$HOME"/.config/containers/systemd/"$progname"-internal.network ]]; then
+    {
+      printf '[Network]\n'
+      printf 'NetworkName=%s-internal\n' "$progname"
+      printf 'Subnet=192.0.2.0/24\n'
+      printf 'Internal=true\n'
+    } > "$HOME"/.config/containers/systemd/"$progname"-internal.network
+  fi
+
+  # Create network definition for egress network
+  if [[ ! -e "$HOME"/.config/containers/systemd/"$progname"-egress.network ]]; then
+    {
+      printf '[Network]\n'
+      printf 'NetworkName=%s-egress\n' "$progname"
+    } > "$HOME"/.config/containers/systemd/"$progname"-egress.network
+  fi
+
+  # Create quadlet service definition for squid container
+  if [[ ! -e "$HOME"/.config/containers/systemd/"$progname"-squid.container ]]; then
+    {
+      printf '[Unit]\n'
+      printf 'Description=Squid egress proxy for %s sandboxes\n' "$progname"
+      printf 'After=%s-internal-network.service %s-egress-network.service\n' "$progname" "$progname"
+      printf 'Requires=%s-internal-network.service %s-egress-network.service\n' "$progname" "$progname"
+      printf '\n'
+      printf '[Container]\n'
+      printf 'ContainerName=%s-squid\n' "$progname"
+      printf 'Image=docker.io/ubuntu/squid:latest\n'
+      printf 'Network=%s-internal.network:ip=192.0.2.2\n' "$progname"
+      printf 'Network=%s-egress.network\n' "$progname"
+      printf 'Volume=%%h/.config/%s/squid.conf:/etc/squid/squid.conf:ro\n' "$progname"
+      printf 'NoNewPrivileges=true\n'
+      printf 'DropCapability=ALL\n'
+      printf 'AddCapability=SETUID SETGID CHOWN DAC_OVERRIDE\n'
+      printf '\n'
+      printf '[Service]\n'
+      printf 'Restart=always\n'
+      printf 'TimeoutStartSec=300\n'
+      printf '\n'
+      printf '[Install]\n'
+      printf 'WantedBy=default.target\n'
+    } > "$HOME"/.config/containers/systemd/"$progname"-squid.container
+  fi
+
+  # Create systemd unit files for the podman objects
+  if [[ ! -e "$HOME"/.config/systemd/user/"$progname"-egress-network.service ||
+        ! -e "$HOME"/.config/systemd/user/"$progname"-internal-network.service ||
+        ! -e "$HOME"/.config/systemd/user/"$progname"-squid.service ]]; then
+    /usr/lib/systemd/system-generators/podman-system-generator --user "$HOME"/.config/systemd/user
+    systemctl --user daemon-reload
+  fi
+
+  # Allow the process to start and run when user it not logged in
+  loginctl enable-linger "$USER"
+
+  # Start squid
+  systemctl --user enable --now "$progname"-squid.service
+fi
+
+# Create podman image, if necessary
+if [[ "$(podman image ls --format ' {{ .Repository }}:{{ .Tag }} ')" != *" localhost/$progname:latest "* ]]; then
+  builddir="$TEMPDIR"/build
+  mkdir -p "$builddir"
+  cat <<EOF > "$builddir"/Containerfile
+  FROM docker.io/library/node:26-trixie-slim
+  ENV DEBIAN_FRONTEND=noninteractive
+
+  RUN \
+      . /etc/os-release \
+      && apt-get update && apt-get install -y --no-install-recommends \
+          git ripgrep vim curl ca-certificates jq less procps openssh-client \
+          podman fuse-overlayfs uidmap slirp4netns \
+      && rm -rf /var/lib/apt/lists/*
+
+  RUN npm install -g @anthropic-ai/claude-code opencode-ai
+
+  USER node
+  ENV HOME=/home/node
+  WORKDIR /workspace
+EOF
+  sed -i 's/^  //' "$builddir"/Containerfile
+  podman build -t "$progname" "$builddir"
+  if [[ "$(podman image ls --format ' {{ .Repository }}:{{ .Tag }} ')" != *" localhost/$progname:latest "* ]]; then
+    echo "Error: Could not build $progname podman image" >&2
+    exit 1
+  fi
+fi
+
+# Create directory for sandbox user data
+[[ ! -d "$HOME"/.local/share/"$progname" ]] && mkdir -p "$HOME"/.local/share/"$progname"
+
+# Set up workspace directory (create if necessary)
+workspace=$PWD
+if [[ "$2" == -- || $# == 1 ]]; then
+  if [[ ! -d "$1" ]]; then
+    echo "Creating workspace $1" >&2
+    if ! mkdir -p "$1"; then
+      exit 1
+    fi
+    if [[ ! -d "$1" ]]; then
+      echo "Error: Could not create workspace $1" >&2
+      exit 1
+    fi
+  fi
+  shift
+  [[ "$1" == -- ]] && shift
+  workspace=$1
+fi
+
+exec podman run -it --rm \
+  --name "$progname" \
+  --runtime krun \
+  --network "$progname"-internal \
+  --userns keep-id:uid="$(id -u)",gid="$(id -g)" \
+  --security-opt no-new-privileges \
+  -v "$workspace":/workspace \
+  -v "$HOME"/.local/share/"$progname":/home/node \
+  -w /workspace \
+  -e TERM \
+  -e HOME=/home/node \
+  -e HTTP_PROXY=http://192.0.2.2:3128 \
+  -e HTTPS_PROXY=http://192.0.2.2:3128 \
+  -e NO_PROXY=localhost,127.0.0.1 \
+  -e NODE_USE_ENV_PROXY=1 \
+  "$progname" "$agent" "$@"
+
