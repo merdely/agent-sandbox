@@ -280,6 +280,7 @@ exec podman run -it --rm \
   -v "$workspace":/workspace \
   -v "$HOME"/.local/share/"$progname":/home/node \
   -w /workspace \
+  -e AGENT=$agent \
   -e TERM \
   -e HOME=/home/node \
   -e http_proxy=http://192.0.2.2:3128 \
