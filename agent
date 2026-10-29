@@ -185,6 +185,10 @@ if [[ "$(podman image ls --format ' {{ .Repository }}:{{ .Tag }} ')" != *" local
 EOF
   sed -i 's/^  //' "$builddir"/Containerfile
   podman build -t "$progname" "$builddir"
+
+  # Clean up builddir
+  rm -Rf "$builddir"
+
   if [[ "$(podman image ls --format ' {{ .Repository }}:{{ .Tag }} ')" != *" localhost/$progname:latest "* ]]; then
     echo "Error: Could not build $progname podman image" >&2
     exit 1
