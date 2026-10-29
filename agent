@@ -46,9 +46,9 @@ build_container() {
   ENV HOME=/home/node
   WORKDIR /workspace
 EOF
-  sed -i 's/^ {2}//' "$builddir"/Containerfile
+  sed -Ei 's/^ {2}//' "$builddir"/Containerfile
   podman build -t "$progname" "$builddir"
-  podman prune -y > /dev/null
+  podman image prune -y > /dev/null
 
   # Clean up builddir
   rm -Rf -- "$builddir"
@@ -122,7 +122,7 @@ if ! podman network exists "$progname"-egress; then
 fi
 
 # Setup squid container if necessary
-if ! podman container exists "$progname"-squid; then
+if ! podman container exists "$progname"-squid || ! podman container inspect -f '{{.State.Running}}' "$progname"-squid &>/dev/null; then
   [[ ! -d "$HOME"/.config/"$progname" ]] && mkdir -p "$HOME"/.config/"$progname"
 
   if [[ ! -e "$HOME"/.config/"$progname"/squid.conf ]]; then
@@ -139,9 +139,15 @@ if ! podman container exists "$progname"-squid; then
     acl agent_https_allowed dstdomain downloads.claude.ai
     acl agent_https_allowed dstdomain mcp-proxy.anthropic.com
     acl agent_https_allowed dstdomain platform.claude.com
+
+    acl agent_https_allowed dstdomain models.dev
+    acl agent_https_allowed dstdomain .opencode.ai
+
     acl agent_https_allowed dstdomain registry.npmjs.org
     acl agent_https_allowed dstdomain archive.ubuntu.com
     acl agent_https_allowed dstdomain download.docker.com
+    # acl agent_https_allowed dstdomain api.github.com
+    # acl agent_https_allowed dstdomain github.com
 
     acl agent_src src 192.0.2.0/24
     acl SSL_ports port 443
@@ -157,7 +163,7 @@ if ! podman container exists "$progname"-squid; then
     via off
     forwarded_for delete
 EOF
-    sed -i 's/^ {4}//' "$HOME"/.config/"$progname"/squid.conf
+    sed -Ei 's/^ {4}//' "$HOME"/.config/"$progname"/squid.conf
     echo "Be sure to customize $HOME/.config/$progname/squid.conf"
     echo "Then restart squid with: podman restart $progname-squid"
   fi
