@@ -29,12 +29,20 @@ build_container() {
       . /etc/os-release \
       && apt-get update && apt-get install -y --no-install-recommends \
           git ripgrep vim curl ca-certificates jq less procps openssh-client \
-          podman fuse-overlayfs uidmap slirp4netns locales \
+          podman fuse-overlayfs uidmap slirp4netns locales tmux iproute2 \
+          dbus-bin \
       && sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
       && locale-gen \
       && rm -rf /var/lib/apt/lists/*
 
-  RUN npm install -g @anthropic-ai/claude-code opencode-ai
+  RUN npm install -g \
+        npm@12.2.1 \
+        @anthropic-ai/claude-code \
+        opencode-ai \
+        @rynfar/meridian \
+        opencode-with-claude
+
+  RUN [ ! -e /etc/machine-id ] && dbus-uuidgen > /etc/machine-id
 
   USER node
   ENV HOME=/home/node
