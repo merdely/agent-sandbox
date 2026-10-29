@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-TEMPDIR=$(mktemp -d)
-trap 'rm -Rf -- "$TEMPDIR"' EXIT
 trap 'exit 1' INT TERM
 
 if [[ -e $HOME/.config/containers/storage.conf ]]; then
@@ -19,8 +17,8 @@ fi
 
 # Container build function to be called with -b or if the container does not exist
 build_container() {
-  builddir="$TEMPDIR"/build
-  mkdir -p "$builddir"
+  builddir=$(mktemp -d) || return 1
+  trap 'rm -Rf -- "$builddir"' EXIT
   cat <<EOF > "$builddir"/Containerfile
   FROM docker.io/library/node:26-trixie-slim
   ENV DEBIAN_FRONTEND=noninteractive
@@ -42,7 +40,7 @@ build_container() {
         @rynfar/meridian \
         opencode-with-claude
 
-  RUN [ ! -e /etc/machine-id ] && dbus-uuidgen > /etc/machine-id
+  RUN dbus-uuidgen --ensure=/etc/machine-id
 
   USER node
   ENV HOME=/home/node
@@ -52,17 +50,19 @@ EOF
   podman build -t "$progname" "$builddir"
 
   # Clean up builddir
-  rm -Rf "$builddir"
+  rm -Rf -- "$builddir"
+  trap - EXIT
 }
 
 progname="agent-sandbox"
 agents=(claude opencode bash)
+default_agent=claude
 # shellcheck disable=1090
 [[ -r "$HOME"/.config/"$progname"/config ]] && source "$HOME"/.config/"$progname"/config
 
 if [[ " ${agents[*]} " != *" $default_agent "* ]]; then
+  echo "Warning: default_agent must be one of ${agents[*]} - using claude" >&2
   default_agent=claude
-  echo "Warning: Agent must be one of ${agents[*]} - using $default_agent" >&2
 fi
 
 usage() {
@@ -91,6 +91,9 @@ while getopts ":hbcos" opt; do
     \?) echo "Unknown option: -$OPTARG" ; exit 1 ;;
   esac
 done
+# getopts consumes a leading "--"; if it did, everything left is agent options
+dashdash=0
+(( OPTIND > 1 )) && [[ "${*:OPTIND-1:1}" == -- ]] && dashdash=1
 shift $(( OPTIND - 1 ))
 
 # Verify $agent is in supported agents list
@@ -225,7 +228,7 @@ fi
 
 # Set up workspace directory (create if necessary)
 workspace=$PWD
-if [[ "$2" == -- || $# == 1 ]]; then
+if (( ! dashdash && $# > 0 )); then
   if [[ ! -d "$1" ]]; then
     echo "Creating workspace $1" >&2
     if ! mkdir -p "$1"; then
@@ -236,7 +239,7 @@ if [[ "$2" == -- || $# == 1 ]]; then
       exit 1
     fi
   fi
-  workspace=$1
+  workspace=$(realpath -- "$1") || exit 1
   shift
   [[ "$1" == -- ]] && shift
 fi
