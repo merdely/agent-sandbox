@@ -123,7 +123,7 @@ if ! podman network exists "$progname"-egress; then
 fi
 
 # Setup squid container if necessary
-if ! podman container exists "$progname"-squid || ! podman container inspect -f '{{.State.Running}}' "$progname"-squid &>/dev/null; then
+if [[ "$(podman container inspect -f '{{.State.Running}}' "$progname"-squid 2>/dev/null)" != true ]]; then
   [[ ! -d "$HOME"/.config/"$progname" ]] && mkdir -p "$HOME"/.config/"$progname"
 
   if [[ ! -e "$HOME"/.config/"$progname"/squid.conf ]]; then
@@ -246,11 +246,19 @@ fi
 
 # Set up meridian
 if [[ ! -e "$HOME"/.local/share/"$progname"/.bashrc ]]; then
-  cat <<EOF > "$HOME"/.local/share/"$progname"/.bashrc
-  if [[ "${AGENT:=claude}" == opencode || "$AGENT" == bash ]]; then
+  cat <<'EOF' > "$HOME"/.local/share/"$progname"/.bashrc
+  if [[ "$SANDBOX_AGENT" == opencode || "$SANDBOX_AGENT" == bash ]]; then
     export ANTHROPIC_API_KEY=x
     export ANTHROPIC_BASE_URL=http://127.0.0.1:3456
-    pgrep -f "node (/usr(/local)?/bin/)?[m]eridian" &>/dev/null || setsid -f meridian &>/dev/null
+    if ! pgrep -f "node (/usr(/local)?/bin/)?[m]eridian" &>/dev/null; then
+      mkdir -p ~/.cache
+      setsid -f meridian &>~/.cache/meridian.log
+      # Wait for meridian to accept connections
+      for _ in {1..50}; do
+        (exec 3<>/dev/tcp/127.0.0.1/3456) 2>/dev/null && break
+        sleep 0.1
+      done
+    fi
   fi
 EOF
   sed -Ei 's/^ {2}//' "$HOME"/.local/share/"$progname"/.bashrc
@@ -283,7 +291,7 @@ exec podman run -it --rm \
   -v "$workspace":/workspace \
   -v "$HOME"/.local/share/"$progname":/home/node \
   -w /workspace \
-  -e AGENT=$agent \
+  -e "SANDBOX_AGENT=$agent" \
   -e TERM \
   -e HOME=/home/node \
   -e http_proxy=http://192.0.2.2:3128 \
