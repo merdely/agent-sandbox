@@ -28,7 +28,8 @@ build_container() {
       && apt-get update && apt-get install -y --no-install-recommends \
           git ripgrep vim curl ca-certificates jq less procps openssh-client \
           podman fuse-overlayfs uidmap slirp4netns locales tmux iproute2 \
-          dbus-bin \
+          dbus-bin python3 python3-venv python3-pip build-essential pkg-config \
+          unzip zip xz-utils bzip2 shellcheck ncurses-term rsync file tree \
       && sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
       && locale-gen \
       && rm -rf /var/lib/apt/lists/*
@@ -48,7 +49,7 @@ build_container() {
 EOF
   sed -Ei 's/^ {2}//' "$builddir"/Containerfile
   podman build -t "$progname" "$builddir"
-  podman image prune -y > /dev/null
+  podman image prune -f > /dev/null
 
   # Clean up builddir
   rm -Rf -- "$builddir"
