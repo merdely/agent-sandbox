@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-export CONTAINERS_STORAGE_CONF=$HOME/.config/containers/storage.conf
+if [[ -e $HOME/.config/containers/storage.conf ]]; then
+  export CONTAINERS_STORAGE_CONF=$HOME/.config/containers/storage.conf
+fi
 
 # Check prerequisites
 ! command -v podman &>/dev/null && { echo "Error: podman required for this program" ; exit 1 ; }
