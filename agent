@@ -55,6 +55,7 @@ EOF
 }
 
 progname="agent-sandbox"
+sandbox_name=$progname
 agents=(claude opencode bash)
 default_agent=claude
 # shellcheck disable=1090
@@ -69,19 +70,21 @@ usage() {
   echo "usage: ${0##*/} [Options] [workspace] [-- agent_options]"
   echo
   echo "Options:"
-  echo "  -h : this help text"
-  echo "  -b : (re-)build the container"
-  echo "  -c : run with claude"
-  echo "  -o : run with opencode"
-  echo "  -s : run bash shell in sandbox"
+  echo "  -h      : this help text"
+  echo "  -n NAME : Name for the sandbox (default: $sandbox_name)"
+  echo "  -b      : (re-)build the container"
+  echo "  -c      : run with claude"
+  echo "  -o      : run with opencode"
+  echo "  -s      : run bash shell in sandbox"
   echo "Default Agent: $default_agent"
   exit "${1:-0}"
 }
 
 agent=$default_agent
 # shellcheck disable=2034
-while getopts ":hbcos" opt; do
+while getopts ":hn:bcos" opt; do
   case $opt in
+    n) sandbox_name=$OPTARG ;;
     b) build_container ; exit ;;
     c) agent=claude ;;
     o) agent=opencode ;;
@@ -245,7 +248,7 @@ if (( ! dashdash && $# > 0 )); then
 fi
 
 exec podman run -it --rm \
-  --name "$progname" \
+  --name "$sandbox_name" \
   --runtime krun \
   --network "$progname"-internal \
   --userns keep-id:uid="$(id -u)",gid="$(id -g)" \
