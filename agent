@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+TEMPDIR=$(mktemp -d)
+trap 'rm -Rf -- "$TEMPDIR"' EXIT
+trap 'exit 1' INT TERM
+
 if [[ -e $HOME/.config/containers/storage.conf ]]; then
   export CONTAINERS_STORAGE_CONF=$HOME/.config/containers/storage.conf
 fi
@@ -13,23 +17,64 @@ if [[ "$(crun --version)" != *LIBKRUN* ]]; then
   exit 1
 fi
 
+# Container build function to be called with -b or if the container does not exist
+build_container() {
+  builddir="$TEMPDIR"/build
+  mkdir -p "$builddir"
+  cat <<EOF > "$builddir"/Containerfile
+  FROM docker.io/library/node:26-trixie-slim
+  ENV DEBIAN_FRONTEND=noninteractive
+
+  RUN \
+      . /etc/os-release \
+      && apt-get update && apt-get install -y --no-install-recommends \
+          git ripgrep vim curl ca-certificates jq less procps openssh-client \
+          podman fuse-overlayfs uidmap slirp4netns locales \
+      && sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
+      && locale-gen \
+      && rm -rf /var/lib/apt/lists/*
+
+  RUN npm install -g @anthropic-ai/claude-code opencode-ai
+
+  USER node
+  ENV HOME=/home/node
+  WORKDIR /workspace
+EOF
+  sed -i 's/^  //' "$builddir"/Containerfile
+  podman build -t "$progname" "$builddir"
+
+  # Clean up builddir
+  rm -Rf "$builddir"
+}
+
 progname="agent-sandbox"
 agents=(claude opencode bash)
+# shellcheck disable=1090
+[[ -r "$HOME"/.config/"$progname"/config ]] && source "$HOME"/.config/"$progname"/config
+
+if [[ " ${agents[*]} " != *" $default_agent "* ]]; then
+  default_agent=claude
+  echo "Warning: Agent must be one of ${agents[*]} - using $default_agent" >&2
+fi
+
 usage() {
   echo "usage: ${0##*/} [Options] [workspace] [-- agent_options]"
   echo
   echo "Options:"
-  echo "  -h         : this help text"
-  echo "  -c         : run with claude (default)"
-  echo "  -o         : run with opencode"
-  echo "  -s         : run bash shell in sandbox"
+  echo "  -h : this help text"
+  echo "  -b : (re-)build the container"
+  echo "  -c : run with claude"
+  echo "  -o : run with opencode"
+  echo "  -s : run bash shell in sandbox"
+  echo "Default Agent: $default_agent"
   exit "${1:-0}"
 }
 
-agent=claude
+agent=$default_agent
 # shellcheck disable=2034
-while getopts ":hcos" opt; do
+while getopts ":hbcos" opt; do
   case $opt in
+    b) build_container ; exit ;;
     c) agent=claude ;;
     o) agent=opencode ;;
     s) agent=bash ;;
@@ -45,10 +90,6 @@ if [[ " ${agents[*]} " != *" $agent "* ]]; then
   echo "Error: Agent must be one of ${agents[*]}" >&2
   exit 1
 fi
-
-TEMPDIR=$(mktemp -d)
-trap 'rm -Rf -- "$TEMPDIR"' EXIT
-trap 'exit 1' INT TERM
 
 # Verify podman networks exist
 if [[ "$(podman network ls --format ' {{ .Name }} ')" != *" $progname-internal "* ]]; then
@@ -164,31 +205,7 @@ fi
 
 # Create podman image, if necessary
 if [[ "$(podman image ls --format ' {{ .Repository }}:{{ .Tag }} ')" != *" localhost/$progname:latest "* ]]; then
-  builddir="$TEMPDIR"/build
-  mkdir -p "$builddir"
-  cat <<EOF > "$builddir"/Containerfile
-  FROM docker.io/library/node:26-trixie-slim
-  ENV DEBIAN_FRONTEND=noninteractive
-
-  RUN \
-      . /etc/os-release \
-      && apt-get update && apt-get install -y --no-install-recommends \
-          git ripgrep vim curl ca-certificates jq less procps openssh-client \
-          podman fuse-overlayfs uidmap slirp4netns \
-      && rm -rf /var/lib/apt/lists/*
-
-  RUN npm install -g @anthropic-ai/claude-code opencode-ai
-
-  USER node
-  ENV HOME=/home/node
-  WORKDIR /workspace
-EOF
-  sed -i 's/^  //' "$builddir"/Containerfile
-  podman build -t "$progname" "$builddir"
-
-  # Clean up builddir
-  rm -Rf "$builddir"
-
+  build_container
   if [[ "$(podman image ls --format ' {{ .Repository }}:{{ .Tag }} ')" != *" localhost/$progname:latest "* ]]; then
     echo "Error: Could not build $progname podman image" >&2
     exit 1
