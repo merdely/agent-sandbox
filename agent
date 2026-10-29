@@ -211,9 +211,9 @@ if [[ "$2" == -- || $# == 1 ]]; then
       exit 1
     fi
   fi
+  workspace=$1
   shift
   [[ "$1" == -- ]] && shift
-  workspace=$1
 fi
 
 exec podman run -it --rm \
@@ -222,7 +222,7 @@ exec podman run -it --rm \
   --network "$progname"-internal \
   --userns keep-id:uid="$(id -u)",gid="$(id -g)" \
   --security-opt no-new-privileges \
-  -v "$workspace":/workspace \
+  -v "${workspace:?workspace is not set}":/workspace \
   -v "$HOME"/.local/share/"$progname":/home/node \
   -w /workspace \
   -e TERM \
