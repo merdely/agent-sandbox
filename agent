@@ -323,6 +323,7 @@ exec podman run -it --rm \
   -w /workspace \
   -e "SANDBOX_AGENT=$agent" \
   -e TERM=xterm-256color \
+  -e LANG=en_US.UTF-8 \
   -e HOME=/home/node \
   -e http_proxy=http://192.0.2.2:3128 \
   -e https_proxy=http://192.0.2.2:3128 \
