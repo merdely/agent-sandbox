@@ -60,12 +60,18 @@ progname="agent-sandbox"
 sandbox_name=$progname
 agents=(claude opencode bash)
 default_agent=claude
+use_tmux=true
 # shellcheck disable=1090
 [[ -r "$HOME"/.config/"$progname"/config ]] && source "$HOME"/.config/"$progname"/config
 
 if [[ " ${agents[*]} " != *" $default_agent "* ]]; then
   echo "Warning: default_agent must be one of ${agents[*]} - using claude" >&2
   default_agent=claude
+fi
+
+if [[ "$use_tmux" != true && "$use_tmux" != false ]]; then
+  echo "Warning: use_tmux must be true or false - using true" >&2
+  use_tmux=true
 fi
 
 usage() {
@@ -78,20 +84,25 @@ usage() {
   echo "  -c      : run with claude"
   echo "  -o      : run with opencode"
   echo "  -s      : run bash shell in sandbox"
+  echo "  -t      : run inside tmux"
+  echo "  -T      : do not run inside tmux"
   echo "Default Agent: $default_agent"
+  echo "Use tmux: $use_tmux"
   exit "${1:-0}"
 }
 
 agent=$default_agent
 build_only=false
 # shellcheck disable=2034
-while getopts ":hn:bcos" opt; do
+while getopts ":hn:bcostT" opt; do
   case $opt in
     n) sandbox_name=$OPTARG ;;
     b) build_only=true ;;
     c) agent=claude ;;
     o) agent=opencode ;;
     s) agent=bash ;;
+    t) use_tmux=true ;;
+    T) use_tmux=false ;;
     h) usage ;;
     :) echo "-$OPTARG requires an argument" ; exit 1 ;;
     \?) echo "Unknown option: -$OPTARG" ; exit 1 ;;
@@ -309,6 +320,11 @@ if [[ ! -e "$homedir"/.tmux.conf ]]; then
   set -g prefix C-a
   bind C-a send-prefix
 EOF
+fi
+
+cmd=(bash -ic 'exec "$@"' bash "$agent" "$@")
+if [[ "$use_tmux" == true ]]; then
+  cmd=(tmux new-session -s "$agent" -n "$agent" -- "${cmd[@]}")
 fi
 
 exec podman run -it --rm \
