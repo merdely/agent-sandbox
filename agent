@@ -329,5 +329,5 @@ exec podman run -it --rm \
   -e https_proxy=http://192.0.2.2:3128 \
   -e no_proxy=localhost,127.0.0.1 \
   -e NODE_USE_ENV_PROXY=1 \
-  "$progname" tmux new-session -s "$agent" -n "$agent" -- bash -ic 'exec "$@"' bash "$agent" "$@"
+  "$progname" "${cmd[@]}"
 
