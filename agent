@@ -102,6 +102,12 @@ dashdash=0
 (( OPTIND > 1 )) && [[ "${*:OPTIND-1:1}" == -- ]] && dashdash=1
 shift $(( OPTIND - 1 ))
 
+# The sandbox name is used as a path component
+if [[ ! "$sandbox_name" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]*$ ]]; then
+  echo "Error: Invalid sandbox name '$sandbox_name' (use letters, digits, '.', '_' and '-')" >&2
+  exit 1
+fi
+
 # Build the container and exit with -b
 if $build_only; then
   build_container
@@ -126,8 +132,8 @@ if (( ! dashdash && $# > 0 )); then
   [[ "$1" == -- ]] && shift
 fi
 
-if [[ "$workspace" == "$HOME" ]]; then
-  read -rp "Warning: You are in $HOME; if this is intential, enter 'yes' in all caps: "
+if [[ "$workspace" == "$(realpath -- "$HOME")" ]]; then
+  read -rp "Warning: The workspace is $HOME; if this is intentional, enter 'yes' in all caps: "
   [[ "$REPLY" != "YES" ]] && exit 1
 fi
 
@@ -265,12 +271,14 @@ if ! podman image exists localhost/$progname:latest; then
 fi
 
 # Create directory for sandbox user data
-[[ ! -d "$HOME"/.local/share/"$progname"/homes ]] && mkdir -p "$HOME"/.local/share/"$progname"/homes
-[[ ! -d "$HOME"/.local/share/"$progname"/homes/"$sandbox_name" ]] && mkdir -p "$HOME"/.local/share/"$progname"/homes/"$sandbox_name"
+homedir="$HOME"/.local/share/"$progname"/homes/"$sandbox_name"
+mkdir -p "$homedir"
 
-# Set up meridian
-if [[ ! -e "$HOME"/.local/share/"$progname"/homes/"$sandbox_name".bashrc ]]; then
-  cat <<'EOF' > "$HOME"/.local/share/"$progname"/homes/"$sandbox_name".bashrc
+# Set up .bashrc: start from the image's skeleton, then add meridian startup
+if [[ ! -e "$homedir"/.bashrc ]]; then
+  podman run --rm "$progname" cat /etc/skel/.bashrc > "$homedir"/.bashrc 2>/dev/null
+  sed -E 's/^ {2}//' >> "$homedir"/.bashrc <<'EOF'
+
   if [[ "$SANDBOX_AGENT" == opencode || "$SANDBOX_AGENT" == bash ]]; then
     export ANTHROPIC_API_KEY=x
     export ANTHROPIC_BASE_URL=http://127.0.0.1:3456
@@ -285,17 +293,17 @@ if [[ ! -e "$HOME"/.local/share/"$progname"/homes/"$sandbox_name".bashrc ]]; the
     fi
   fi
 EOF
-  sed -Ei 's/^ {2}//' "$HOME"/.local/share/"$progname"/homes/"$sandbox_name".bashrc
 fi
 
 exec podman run -it --rm \
   --name "$sandbox_name" \
+  --hostname "$sandbox_name" \
   --runtime krun \
   --network "$progname"-internal \
   --userns keep-id:uid="$(id -u)",gid="$(id -g)" \
   --security-opt no-new-privileges \
   -v "$workspace":/workspace \
-  -v "$HOME"/.local/share/"$progname"/homes/"$sandbox_name":/home/node \
+  -v "$homedir":/home/node \
   -w /workspace \
   -e "SANDBOX_AGENT=$agent" \
   -e TERM=xterm-256color \
