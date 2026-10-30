@@ -295,6 +295,22 @@ if [[ ! -e "$homedir"/.bashrc ]]; then
 EOF
 fi
 
+# Set up tmux config
+if [[ ! -e "$homedir"/.tmux.conf ]]; then
+  sed -E 's/^ {2}//' > "$homedir"/.tmux.conf <<'EOF'
+  # Short escape time keeps Esc responsive in vim and opencode
+  set -s escape-time 10
+  set -g mouse on
+  set -g history-limit 50000
+  # Keep the window open if the agent fails so the error can be read
+  set -g remain-on-exit failed
+  # Use C-a so it does not clash with a tmux running on the host
+  unbind C-b
+  set -g prefix C-a
+  bind C-a send-prefix
+EOF
+fi
+
 exec podman run -it --rm \
   --name "$sandbox_name" \
   --hostname "$sandbox_name" \
@@ -312,5 +328,5 @@ exec podman run -it --rm \
   -e https_proxy=http://192.0.2.2:3128 \
   -e no_proxy=localhost,127.0.0.1 \
   -e NODE_USE_ENV_PROXY=1 \
-  "$progname" bash "-ic" 'exec "$@"' bash "$agent" "$@"
+  "$progname" tmux new-session -s "$agent" -n "$agent" -- bash -ic 'exec "$@"' bash "$agent" "$@"
 
