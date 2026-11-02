@@ -72,7 +72,7 @@ build_container() {
 
 progname="agent-sandbox"
 sandbox_name=$progname
-agents=(claude opencode bash)
+agents=(claude opencode pi bash)
 default_agent=claude
 use_tmux=true
 # shellcheck disable=1090
@@ -97,6 +97,7 @@ usage() {
   echo "  -b      : (re-)build the container"
   echo "  -c      : run with claude"
   echo "  -o      : run with opencode"
+  echo "  -p      : run with pi"
   echo "  -s      : run bash shell in sandbox"
   echo "  -r      : run bash shell as root in sandbox"
   echo "  -t      : run inside tmux"
@@ -111,12 +112,13 @@ agent=$default_agent
 build_only=false
 podman_args=()
 # shellcheck disable=2034
-while getopts ":hn:bcosrtTC" opt; do
+while getopts ":hn:bcopsrtTC" opt; do
   case $opt in
     n) sandbox_name=$OPTARG ;;
     b) build_only=true ;;
     c) agent=claude ;;
     o) agent=opencode ;;
+    p) agent=pi ;;
     s) agent=bash ;;
     r) agent=bash ; podman_args+=(-u root) ;;
     t) use_tmux=true ;;
