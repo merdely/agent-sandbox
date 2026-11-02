@@ -84,6 +84,7 @@ usage() {
   echo "  -c      : run with claude"
   echo "  -o      : run with opencode"
   echo "  -s      : run bash shell in sandbox"
+  echo "  -r      : run bash shell as root in sandbox"
   echo "  -t      : run inside tmux"
   echo "  -T      : do not run inside tmux"
   echo "Default Agent: $default_agent"
@@ -93,14 +94,16 @@ usage() {
 
 agent=$default_agent
 build_only=false
+podman_args=()
 # shellcheck disable=2034
-while getopts ":hn:bcostT" opt; do
+while getopts ":hn:bcosrtT" opt; do
   case $opt in
     n) sandbox_name=$OPTARG ;;
     b) build_only=true ;;
     c) agent=claude ;;
     o) agent=opencode ;;
     s) agent=bash ;;
+    r) agent=bash ; podman_args+=(-u root) ;;
     t) use_tmux=true ;;
     T) use_tmux=false ;;
     h) usage ;;
@@ -345,5 +348,6 @@ exec podman run -it --rm \
   -e https_proxy=http://192.0.2.2:3128 \
   -e no_proxy=localhost,127.0.0.1 \
   -e NODE_USE_ENV_PROXY=1 \
+  "${podman_args[@]}" \
   "$progname" "${cmd[@]}"
 
