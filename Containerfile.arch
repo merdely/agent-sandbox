@@ -1,0 +1,42 @@
+FROM docker.io/archlinux/archlinux:latest
+
+RUN dbus-uuidgen --ensure=/etc/machine-id \
+    && sed -ri 's/^#(en_US.U.*)$/\1/' /etc/locale.gen \
+    && locale-gen \
+    && echo 'LANG=en_US.UTF-8' >> /etc/locale.conf \
+    && useradd -m node
+
+RUN . /etc/os-release \
+    && pacman -Syu --noconfirm vim ed curl psutils procps openssh dbus podman \
+        iproute2 tmux unzip zip xz bzip2 rsync file tree ripgrep fd jq less \
+        base-devel go python3 shellcheck nodejs npm lesspipe \
+        cargo rust clang lld zig github-cli glab tea forgejo-cli \
+        lazygit git subversion mercurial \
+    && rm -Rf /var/cache/pacman/pkg
+
+RUN npm install -g \
+      @anthropic-ai/claude-code \
+      opencode-ai \
+      @rynfar/meridian \
+      opencode-with-claude && \
+    npm install -g --ignore-scripts @earendil-works/pi-coding-agent @earendil-works/pi-ai
+
+# RUN sed -ri 's/(\(| )debug/\1!debug/' /etc/makepkg.conf \
+#     && su - node -c " \
+#       mkdir /tmp/build \
+#       && git -C /tmp/build clone https://aur.archlinux.org/claude-code.git \
+#       && git -C /tmp/build/claude-code switch -c "${CLAUDE_CODE}" "${CLAUDE_CODE}" \
+#       && ( cd /tmp/build/claude-code && makepkg --noconfirm -s ) \
+#       && git -C /tmp/build clone https://aur.archlinux.org/pi.git \
+#       && git -C /tmp/build/pi switch -c "${PI}" "${PI}" \
+#       && ( cd /tmp/build/pi && makepkg --noconfirm -s ) \
+#       && git -C /tmp/build clone https://aur.archlinux.org/claw-code-git.git \
+#       && git -C /tmp/build/claw-code-git switch -c "${CLAW_CODE}" "${CLAW_CODE}" \
+#       && ( cd /tmp/build/claw-code-git && makepkg --noconfirm -s ) \
+#     " \
+#     && pacman --noconfirm -U /tmp/build/*/*.pkg.tar.zst \
+#     && rm -Rf /tmp/build /var/cache/pacman/pkg
+
+USER node
+ENV HOME=/home/node
+WORKDIR /workspace
