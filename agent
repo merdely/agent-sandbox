@@ -206,6 +206,7 @@ if [[ "$(podman container inspect -f '{{.State.Running}}' "$progname"-squid 2>/d
 
     acl agent_https_allowed dstdomain models.dev
     acl agent_https_allowed dstdomain .opencode.ai
+    acl agent_https_allowed dstdomain pi.dev
 
     acl agent_https_allowed dstdomain registry.npmjs.org
     acl agent_https_allowed dstdomain archive.ubuntu.com
