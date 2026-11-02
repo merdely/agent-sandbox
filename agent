@@ -15,39 +15,53 @@ if [[ "$(crun --version)" != *LIBKRUN* ]]; then
   exit 1
 fi
 
+update_containerfile() {
+  if [[ -e "$HOME"/.config/"$progname"/Containerfile ]]; then
+    cp "$HOME"/.config/"$progname"/Containerfile "$HOME"/.config/"$progname"/Containerfile."$(date +"%Y%m%d-%H%M%S")"
+  fi
+  cat <<EOF > "$HOME"/.config/"$progname"/Containerfile
+    FROM docker.io/library/node:26-trixie-slim
+    ENV DEBIAN_FRONTEND=noninteractive
+
+    RUN \
+        . /etc/os-release \
+        && apt-get update && apt-get install -y --no-install-recommends \
+            git ripgrep vim curl ca-certificates jq less procps openssh-client \
+            podman fuse-overlayfs uidmap slirp4netns locales tmux iproute2 \
+            dbus-bin python3 python3-venv python3-pip build-essential pkg-config \
+            unzip zip xz-utils bzip2 shellcheck ncurses-term rsync file tree \
+        && sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
+        && locale-gen \
+        && rm -rf /var/lib/apt/lists/*
+
+    RUN npm install -g \
+          npm@12 \
+          @anthropic-ai/claude-code \
+          opencode-ai \
+          @rynfar/meridian \
+          opencode-with-claude && \
+        npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+
+    RUN dbus-uuidgen --ensure=/etc/machine-id
+
+    USER node
+    ENV HOME=/home/node
+    WORKDIR /workspace
+EOF
+  sed -Ei 's/^ {4}//' "$HOME"/.config/"$progname"/Containerfile
+}
+
 # Container build function to be called with -b or if the container does not exist
 build_container() {
   builddir=$(mktemp -d) || return 1
   trap 'rm -Rf -- "$builddir"' EXIT
-  cat <<EOF > "$builddir"/Containerfile
-  FROM docker.io/library/node:26-trixie-slim
-  ENV DEBIAN_FRONTEND=noninteractive
 
-  RUN \
-      . /etc/os-release \
-      && apt-get update && apt-get install -y --no-install-recommends \
-          git ripgrep vim curl ca-certificates jq less procps openssh-client \
-          podman fuse-overlayfs uidmap slirp4netns locales tmux iproute2 \
-          dbus-bin python3 python3-venv python3-pip build-essential pkg-config \
-          unzip zip xz-utils bzip2 shellcheck ncurses-term rsync file tree \
-      && sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
-      && locale-gen \
-      && rm -rf /var/lib/apt/lists/*
+  if [[ ! -r "$HOME"/.config/"$progname"/Containerfile ]]; then
+    update_containerfile
+  fi
 
-  RUN npm install -g \
-        npm@12 \
-        @anthropic-ai/claude-code \
-        opencode-ai \
-        @rynfar/meridian \
-        opencode-with-claude
-
-  RUN dbus-uuidgen --ensure=/etc/machine-id
-
-  USER node
-  ENV HOME=/home/node
-  WORKDIR /workspace
-EOF
-  sed -Ei 's/^ {2}//' "$builddir"/Containerfile
+  # Copy config Containerfile to builddir
+  cp "$HOME"/.config/"$progname"/Containerfile "$builddir"/
   podman build -t "$progname" "$builddir"
   podman image prune -f > /dev/null
 
@@ -87,6 +101,7 @@ usage() {
   echo "  -r      : run bash shell as root in sandbox"
   echo "  -t      : run inside tmux"
   echo "  -T      : do not run inside tmux"
+  echo "  -C      : update ~/.config/$progname/Containerfile from template"
   echo "Default Agent: $default_agent"
   echo "Use tmux: $use_tmux"
   exit "${1:-0}"
@@ -96,7 +111,7 @@ agent=$default_agent
 build_only=false
 podman_args=()
 # shellcheck disable=2034
-while getopts ":hn:bcosrtT" opt; do
+while getopts ":hn:bcosrtTC" opt; do
   case $opt in
     n) sandbox_name=$OPTARG ;;
     b) build_only=true ;;
@@ -106,6 +121,9 @@ while getopts ":hn:bcosrtT" opt; do
     r) agent=bash ; podman_args+=(-u root) ;;
     t) use_tmux=true ;;
     T) use_tmux=false ;;
+    C) echo "Updating ~/.config/$progname/Containerfile from template"
+       update_containerfile
+       exit ;;
     h) usage ;;
     :) echo "-$OPTARG requires an argument" ; exit 1 ;;
     \?) echo "Unknown option: -$OPTARG" ; exit 1 ;;
