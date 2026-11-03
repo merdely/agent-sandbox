@@ -16,9 +16,9 @@ Agent Sandbox is a way to run AI Agents inside a MicroVM.
 
 * `agent -s` : open a shell in the sandbox. opencode and claude can be run from there
 * `agent -o` : run opencode in the sandbox
-* `agent -c` : run claude code in the 
+* `agent -c` : run claude code in the sandbox
 * `agent -n foo -c`: run claude code in a sandbox named foo
-* `agent -H ~/foo -n foo`: run claude code in sandbox named foo with its home directory as ~/foo
+* `agent -H $HOME/foo -n foo`: run claude code in sandbox named foo with its home directory as ~/foo
 
 ## Roadmap
 
