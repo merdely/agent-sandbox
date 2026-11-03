@@ -9,7 +9,7 @@ Agent Sandbox is a way to run AI Agents inside a MicroVM.
 * Supports opencode with Anthropic and Claude Code right now
   * Uses [meridian](https://github.com/rynfar/meridian) and 
   [opencode-with-claude](https://github.com/ianjwhite99/opencode-with-claude)
-* Configurable sandbox home directory (~/.local/share/agent-sandbox/homes/$sandbox_name)
+* Configurable sandbox home directory (~/.local/share/agent-sandbox/homes/$sandbox_name), -H overrides the default
 * Configurable proxy (~/.config/agent-sandbox/squid.conf)
 
 ## Usage:
@@ -18,6 +18,7 @@ Agent Sandbox is a way to run AI Agents inside a MicroVM.
 * `agent -o` : run opencode in the sandbox
 * `agent -c` : run claude code in the 
 * `agent -n foo -c`: run claude code in a sandbox named foo
+* `agent -H ~/foo -n foo`: run claude code in sandbox named foo with its home directory as ~/foo
 
 ## Roadmap
 

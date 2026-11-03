@@ -72,7 +72,7 @@ build_container() {
 
 progname="agent-sandbox"
 sandbox_name=$progname
-sandbox_home="$HOME"/.local/share/"$progname"/homes/"$sandbox_name"
+sandbox_home=
 agents=(claude opencode pi bash)
 default_agent=claude
 use_tmux=true
@@ -95,7 +95,7 @@ usage() {
   echo "Options:"
   echo "  -h      : this help text"
   echo "  -n NAME : Name for the sandbox (default: $sandbox_name)"
-  echo "  -H HOME : Use a separate HOME directory for sandbox (default: ${sandbox_home/#$HOME/\~})"
+  echo "  -H HOME : Use a separate HOME directory for sandbox (default: ~/.local/share/$progname/homes/NAME)"
   echo "  -b      : (re-)build the container"
   echo "  -c      : run with claude"
   echo "  -o      : run with opencode"
@@ -138,6 +138,7 @@ done
 dashdash=0
 (( OPTIND > 1 )) && [[ "${*:OPTIND-1:1}" == -- ]] && dashdash=1
 shift $(( OPTIND - 1 ))
+sandbox_home="$HOME"/.local/share/"$progname"/homes/"$sandbox_name"
 
 # The sandbox name is used as a path component
 if [[ ! "$sandbox_name" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]*$ ]]; then
@@ -309,7 +310,13 @@ if ! podman image exists localhost/$progname:latest; then
 fi
 
 # Create directory for sandbox user data
-mkdir -p "$sandbox_home"
+if [[ "$(realpath -- "$sandbox_home")" == "$(realpath -- "$HOME")" ]]; then
+  read -rp "Warning: The sandbox home is $HOME; if this is intentional, enter 'yes' in all caps: "
+  [[ "$REPLY" != "YES" ]] && exit 1
+fi
+
+mkdir -p "$sandbox_home" || exit 1
+sandbox_home=$(realpath -- "$sandbox_home") || exit 1
 
 # Set up .bashrc: start from the image's skeleton, then add meridian startup
 if [[ ! -e "$sandbox_home"/.bashrc ]]; then
@@ -355,10 +362,10 @@ fi
 
 sandbox_name_base=$sandbox_name
 if podman container exists "$sandbox_name" &>/dev/null; then
-  sandbox_name=$sandbox_name_base.$$
+  sandbox_name=$sandbox_name_base-$$
 fi
 while podman container exists "$sandbox_name" &>/dev/null; do
-  sandbox_name=$sandbox_name_base.$RANDOM
+  sandbox_name=$sandbox_name_base-$RANDOM
 done
 
 exec podman run -it --rm \
