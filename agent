@@ -72,6 +72,7 @@ build_container() {
 
 progname="agent-sandbox"
 sandbox_name=$progname
+sandbox_home="$HOME"/.local/share/"$progname"/homes/"$sandbox_name"
 agents=(claude opencode pi bash)
 default_agent=claude
 use_tmux=true
@@ -94,6 +95,7 @@ usage() {
   echo "Options:"
   echo "  -h      : this help text"
   echo "  -n NAME : Name for the sandbox (default: $sandbox_name)"
+  echo "  -H HOME : Use a separate HOME directory for sandbox (default: ${sandbox_home/#$HOME/\~})"
   echo "  -b      : (re-)build the container"
   echo "  -c      : run with claude"
   echo "  -o      : run with opencode"
@@ -112,9 +114,10 @@ agent=$default_agent
 build_only=false
 podman_args=()
 # shellcheck disable=2034
-while getopts ":hn:bcopsrtTC" opt; do
+while getopts ":hn:H:bcopsrtTC" opt; do
   case $opt in
     n) sandbox_name=$OPTARG ;;
+    H) sandbox_home=$OPTARG ;;
     b) build_only=true ;;
     c) agent=claude ;;
     o) agent=opencode ;;
@@ -306,13 +309,12 @@ if ! podman image exists localhost/$progname:latest; then
 fi
 
 # Create directory for sandbox user data
-homedir="$HOME"/.local/share/"$progname"/homes/"$sandbox_name"
-mkdir -p "$homedir"
+mkdir -p "$sandbox_home"
 
 # Set up .bashrc: start from the image's skeleton, then add meridian startup
-if [[ ! -e "$homedir"/.bashrc ]]; then
-  podman run --rm "$progname" cat /etc/skel/.bashrc > "$homedir"/.bashrc 2>/dev/null
-  sed -E 's/^ {2}//' >> "$homedir"/.bashrc <<'EOF'
+if [[ ! -e "$sandbox_home"/.bashrc ]]; then
+  podman run --rm "$progname" cat /etc/skel/.bashrc > "$sandbox_home"/.bashrc 2>/dev/null
+  sed -E 's/^ {2}//' >> "$sandbox_home"/.bashrc <<'EOF'
 
   if [[ "$SANDBOX_AGENT" == opencode || "$SANDBOX_AGENT" == bash ]]; then
     export ANTHROPIC_API_KEY=x
@@ -331,8 +333,8 @@ EOF
 fi
 
 # Set up tmux config
-if [[ ! -e "$homedir"/.tmux.conf ]]; then
-  sed -E 's/^ {2}//' > "$homedir"/.tmux.conf <<'EOF'
+if [[ ! -e "$sandbox_home"/.tmux.conf ]]; then
+  sed -E 's/^ {2}//' > "$sandbox_home"/.tmux.conf <<'EOF'
   # Short escape time keeps Esc responsive in vim and opencode
   set -s escape-time 10
   set -g mouse on
@@ -351,6 +353,14 @@ if [[ "$use_tmux" == true ]]; then
   cmd=(tmux new-session -s "$agent" -n "$agent" -- "${cmd[@]}")
 fi
 
+sandbox_name_base=$sandbox_name
+if podman container exists "$sandbox_name" &>/dev/null; then
+  sandbox_name=$sandbox_name_base.$$
+fi
+while podman container exists "$sandbox_name" &>/dev/null; do
+  sandbox_name=$sandbox_name_base.$RANDOM
+done
+
 exec podman run -it --rm \
   --name "$sandbox_name" \
   --hostname "$sandbox_name" \
@@ -359,7 +369,7 @@ exec podman run -it --rm \
   --userns keep-id:uid="$(id -u)",gid="$(id -g)" \
   --security-opt no-new-privileges \
   -v "$workspace":/workspace \
-  -v "$homedir":/home/node \
+  -v "$sandbox_home":/home/node \
   -w /workspace \
   -e "SANDBOX_AGENT=$agent" \
   -e TERM=xterm-256color \
