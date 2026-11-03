@@ -138,7 +138,7 @@ done
 dashdash=0
 (( OPTIND > 1 )) && [[ "${*:OPTIND-1:1}" == -- ]] && dashdash=1
 shift $(( OPTIND - 1 ))
-: "${sandbox_name:=$HOME/.local/share/$progname/homes/$sandbox_name}"
+: "${sandbox_home:=$HOME/.local/share/$progname/homes/$sandbox_name}"
 
 # The sandbox name is used as a path component
 if [[ ! "$sandbox_name" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]*$ ]]; then
