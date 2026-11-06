@@ -318,6 +318,16 @@ fi
 mkdir -p "$sandbox_home" || exit 1
 sandbox_home=$(realpath -- "$sandbox_home") || exit 1
 
+# Set up .bash_profile
+if [[ ! -e "$sandbox_home"/.bash_profile ]]; then
+  podman run --rm "$progname" cat /etc/skel/.bash_profile > "$sandbox_home"/.bash_profile 2>/dev/null
+fi
+
+# Set up .bash_logout
+if [[ ! -e "$sandbox_home"/.bash_logout ]]; then
+  podman run --rm "$progname" cat /etc/skel/.bash_logout > "$sandbox_home"/.bash_logout 2>/dev/null
+fi
+
 # Set up .bashrc: start from the image's skeleton, then add meridian startup
 if [[ ! -e "$sandbox_home"/.bashrc ]]; then
   podman run --rm "$progname" cat /etc/skel/.bashrc > "$sandbox_home"/.bashrc 2>/dev/null
