@@ -62,7 +62,7 @@ build_container() {
 
   # Copy config Containerfile to builddir
   cp "$HOME"/.config/"$progname"/Containerfile "$builddir"/
-  podman build -t "$progname" "$builddir"
+  podman build --pull=always -t "$progname" "$builddir"
   podman image prune -f > /dev/null
 
   # Clean up builddir
