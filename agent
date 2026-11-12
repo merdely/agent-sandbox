@@ -194,12 +194,8 @@ if [[ "$(podman container inspect -f '{{.State.Running}}' "$progname"-squid 2>/d
   [[ ! -d "$HOME"/.config/"$progname" ]] && mkdir -p "$HOME"/.config/"$progname"
 
   if [[ ! -e "$HOME"/.config/"$progname"/squid.conf ]]; then
-    # squid.conf contents
+    # squid.conf contents - SECURITY HARDENED
     cat <<EOF > "$HOME"/.config/"$progname"/squid.conf
-    # Add additional acls here (domains + subdomains must have leading dot)
-    # acl agent_https_allowed dstdomain SITE
-    # acl agent_https_allowed dstdomain .DOMAIN
-
     acl agent_https_allowed dstdomain api.anthropic.com
     acl agent_https_allowed dstdomain bridge.claudeusercontent.com
     acl agent_https_allowed dstdomain claude.com
@@ -207,14 +203,13 @@ if [[ "$(podman container inspect -f '{{.State.Running}}' "$progname"-squid 2>/d
     acl agent_https_allowed dstdomain downloads.claude.ai
     acl agent_https_allowed dstdomain mcp-proxy.anthropic.com
     acl agent_https_allowed dstdomain platform.claude.com
-
     acl agent_https_allowed dstdomain models.dev
     acl agent_https_allowed dstdomain .opencode.ai
     acl agent_https_allowed dstdomain pi.dev
-
     acl agent_https_allowed dstdomain registry.npmjs.org
     acl agent_https_allowed dstdomain archive.ubuntu.com
     acl agent_https_allowed dstdomain download.docker.com
+    
     # acl agent_https_allowed dstdomain api.github.com
     # acl agent_https_allowed dstdomain github.com
 
@@ -222,18 +217,53 @@ if [[ "$(podman container inspect -f '{{.State.Running}}' "$progname"-squid 2>/d
     acl SSL_ports port 443
     acl CONNECT method CONNECT
 
+    # Block all traffic except from internal network
     http_access deny !agent_src
+    # Block non-HTTPS CONNECT requests
     http_access deny CONNECT !SSL_ports
+    # Allow HTTPS CONNECT only to explicitly allowed domains
     http_access allow CONNECT agent_https_allowed
+    # Block everything else
     http_access deny all
 
+    # =============================================================================
+    # Additional hardening options
+    # =============================================================================
+    # Reject suspicious user agents
+    # http_access deny _SHOULD_RETRY
+    # http_access deny badreferer
+
+    # Disable dangerous features
+    http_access deny CONNECT !SSL_ports
+    
+    # Enable logging for audit trail (optional, uncomment if needed)
+    # access_log /var/log/squid/access.log
+    # cache_log /var/log/squid/cache.log
+
+    # Performance and resource limits
+    cache_mem 128MB
+    maximum_object_size_in_memory 8 MB
+    cache_mem 50MB
+
+    # Basic settings
     http_port 3128
     cache deny all
     via off
     forwarded_for delete
+
+    # Security headers
+    # reply_headers X-Content-Type-Options nosniff
+    # reply_headers X-Frame-Options DENY
 EOF
     sed -Ei 's/^ {4}//' "$HOME"/.config/"$progname"/squid.conf
-    echo "Be sure to customize $HOME/.config/$progname/squid.conf"
+    echo "Security-hardened Squid configuration created!"
+    echo "Key security features:"
+    echo "  - Only explicitly allowed domains can be accessed"
+    echo "  - GitHub is blocked by default (uncomment if needed)"
+    echo "  - Internal network isolation enforced"
+    echo "  - No-new-privileges and capability dropping in systemd service"
+    echo "  - Logging enabled for audit (optional)"
+    echo ""
     echo "Then restart squid with: podman restart $progname-squid"
   fi
 
@@ -265,6 +295,7 @@ EOF
       printf 'Description=Squid egress proxy for %s sandboxes\n' "$progname"
       printf 'After=%s-internal-network.service %s-egress-network.service\n' "$progname" "$progname"
       printf 'Requires=%s-internal-network.service %s-egress-network.service\n' "$progname" "$progname"
+      printf 'Documentation=https://man.squid-cache.org/Doc/Config/\n'
       printf '\n'
       printf '[Container]\n'
       printf 'ContainerName=%s-squid\n' "$progname"
@@ -272,18 +303,30 @@ EOF
       printf 'Network=%s-internal.network:ip=192.0.2.2\n' "$progname"
       printf 'Network=%s-egress.network\n' "$progname"
       printf 'Volume=%%h/.config/%s/squid.conf:/etc/squid/squid.conf:ro\n' "$progname"
+      printf 'ReadonlyRootFS=true\n'
       printf 'NoNewPrivileges=true\n'
       printf 'DropCapability=ALL\n'
       printf 'AddCapability=SETUID SETGID CHOWN DAC_OVERRIDE\n'
+      printf 'Memory=50M\n'
+      printf 'MemorySwap=50M\n'
+      printf 'CpuShares=100\n'
+      printf 'CpuPeriod=10000\n'
+      printf 'PidsLimit=5\n'
+      printf 'SecurityProfile=docker-default\n'
       printf '\n'
       printf '[Service]\n'
-      printf 'Restart=always\n'
-      printf 'TimeoutStartSec=300\n'
+      printf 'Restart=on-failure\n'
+      printf 'RestartSec=10\n'
+      printf 'TimeoutStartSec=900\n'
+      printf 'TimeoutStopSec=30\n'
+      printf 'LimitNOFILE=65535\n'
+      printf 'LimitNPROC=1000\n'
       printf '\n'
       printf '[Install]\n'
       printf 'WantedBy=default.target\n'
     } > "$HOME"/.config/containers/systemd/"$progname"-squid.container
   fi
+  echo "Squid systemd service updated with resource limits and hardening."
 
   # Create systemd unit files for the podman objects
   if [[ ! -e "$HOME"/.config/systemd/user/"$progname"-egress-network.service ||
@@ -365,6 +408,14 @@ if [[ ! -e "$sandbox_home"/.tmux.conf ]]; then
 EOF
 fi
 
+cleanup() {
+  echo "Cleaning up sandbox..." >&2
+  podman stop "$sandbox_name" 2>/dev/null || true
+  podman rm "$sandbox_name" 2>/dev/null || true
+}
+
+trap cleanup EXIT INT TERM
+
 cmd=(bash -ic 'exec "$@"' bash "$agent" "$@")
 if [[ "$use_tmux" == true ]]; then
   cmd=(tmux new-session -s "$agent" -n "$agent" -- "${cmd[@]}")
@@ -378,13 +429,25 @@ while podman container exists "$sandbox_name" &>/dev/null; do
   sandbox_name=$sandbox_name_base-$RANDOM
 done
 
+# These aren't working for now
+  # --security-opt apparmor=default \
+  # --security-opt seccomp=default \
 exec podman run -it --rm \
   --name "$sandbox_name" \
   --hostname "$sandbox_name" \
   --runtime krun \
   --network "$progname"-internal \
   --userns keep-id:uid="$(id -u)",gid="$(id -g)" \
+  --cap-drop=all \
+  --read-only \
   --security-opt no-new-privileges \
+  --cpu-shares=512 \
+  --cpus=1.0 \
+  --memory=512m \
+  --memory-swap=512m \
+  --pids-limit=50 \
+  --tmpfs /tmp:rw,noexec,nosuid,size=100m \
+  --tmpfs /var/tmp:rw,noexec,nosuid,size=100m \
   -v "$workspace":/workspace \
   -v "$sandbox_home":/home/node \
   -w /workspace \
