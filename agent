@@ -15,6 +15,147 @@ if [[ "$(crun --version)" != *LIBKRUN* ]]; then
   exit 1
 fi
 
+# TODO: Add ability to update tmux.conf and .bashrc with -T and -B
+
+update_quadlet() {
+  if [[ ! -e "$HOME"/.config/containers/systemd/"$progname"-squid.container ]]; then
+    {
+      printf '[Unit]\n'
+      printf 'Description=Squid egress proxy for %s sandboxes\n' "$progname"
+      printf 'After=%s-internal-network.service %s-egress-network.service\n' "$progname" "$progname"
+      printf 'Requires=%s-internal-network.service %s-egress-network.service\n' "$progname" "$progname"
+      printf 'Documentation=https://man.squid-cache.org/Doc/Config/\n'
+      printf '\n'
+      printf '[Container]\n'
+      printf 'ContainerName=%s-squid\n' "$progname"
+      printf 'Image=docker.io/ubuntu/squid:latest\n'
+      printf 'Network=%s-internal.network:ip=192.0.2.2\n' "$progname"
+      printf 'Network=%s-egress.network\n' "$progname"
+      printf 'Volume=%%h/.config/%s/squid.conf:/etc/squid/squid.conf:ro\n' "$progname"
+      printf 'ReadonlyRootFS=true\n'
+      printf 'NoNewPrivileges=true\n'
+      printf 'DropCapability=ALL\n'
+      printf 'AddCapability=SETUID SETGID CHOWN DAC_OVERRIDE\n'
+      printf 'Memory=50M\n'
+      printf 'MemorySwap=50M\n'
+      printf 'CpuShares=100\n'
+      printf 'CpuPeriod=10000\n'
+      printf 'PidsLimit=5\n'
+      printf 'SecurityProfile=docker-default\n'
+      printf '\n'
+      printf '[Service]\n'
+      printf 'Restart=on-failure\n'
+      printf 'RestartSec=10\n'
+      printf 'TimeoutStartSec=900\n'
+      printf 'TimeoutStopSec=30\n'
+      printf 'LimitNOFILE=65535\n'
+      printf 'LimitNPROC=1000\n'
+      printf '\n'
+      printf '[Install]\n'
+      printf 'WantedBy=default.target\n'
+    } > "$HOME"/.config/containers/systemd/"$progname"-squid.container
+  fi
+  echo "Squid systemd service updated with resource limits and hardening."
+  update_service_files
+}
+
+update_service_files() {
+  if [[ ! -e "$HOME"/.config/systemd/user/"$progname"-egress-network.service ||
+        ! -e "$HOME"/.config/systemd/user/"$progname"-internal-network.service ||
+        ! -e "$HOME"/.config/systemd/user/"$progname"-squid.service ]]; then
+    /usr/lib/systemd/system-generators/podman-system-generator --user "$HOME"/.config/systemd/user
+    systemctl --user daemon-reload
+  fi
+}
+
+update_squid_conf() {
+  if [[ ! -e "$HOME"/.config/"$progname"/squid.conf ]]; then
+    # squid.conf contents
+    cat <<EOF > "$HOME"/.config/"$progname"/squid.conf
+    acl agent_https_allowed dstdomain api.anthropic.com
+    acl agent_https_allowed dstdomain bridge.claudeusercontent.com
+    acl agent_https_allowed dstdomain claude.com
+    acl agent_https_allowed dstdomain code.claude.com
+    acl agent_https_allowed dstdomain downloads.claude.ai
+    acl agent_https_allowed dstdomain mcp-proxy.anthropic.com
+    acl agent_https_allowed dstdomain platform.claude.com
+    acl agent_https_allowed dstdomain models.dev
+    acl agent_https_allowed dstdomain .opencode.ai
+    acl agent_https_allowed dstdomain pi.dev
+    acl agent_https_allowed dstdomain registry.npmjs.org
+    acl agent_https_allowed dstdomain archive.ubuntu.com
+    acl agent_https_allowed dstdomain download.docker.com
+    
+    # acl agent_https_allowed dstdomain api.github.com
+    # acl agent_https_allowed dstdomain github.com
+
+    acl agent_src src 192.0.2.0/24
+    acl SSL_ports port 443
+    acl CONNECT method CONNECT
+
+    # Block all traffic except from internal network
+    http_access deny !agent_src
+    # Block non-HTTPS CONNECT requests
+    http_access deny CONNECT !SSL_ports
+    # Allow HTTPS CONNECT only to explicitly allowed domains
+    http_access allow CONNECT agent_https_allowed
+    # Block everything else
+    http_access deny all
+
+    # =============================================================================
+    # Additional hardening options
+    # =============================================================================
+    # Reject suspicious user agents
+    # http_access deny _SHOULD_RETRY
+    # http_access deny badreferer
+
+    # Disable dangerous features
+    http_access deny CONNECT !SSL_ports
+    
+    # Enable logging for audit trail (optional, uncomment if needed)
+    # access_log /var/log/squid/access.log
+    # cache_log /var/log/squid/cache.log
+
+    # Performance and resource limits
+    cache_mem 128MB
+    maximum_object_size_in_memory 8 MB
+    cache_mem 50MB
+
+    # Basic settings
+    http_port 3128
+    cache deny all
+    via off
+    forwarded_for delete
+
+    # Security headers
+    # reply_headers X-Content-Type-Options nosniff
+    # reply_headers X-Frame-Options DENY
+EOF
+    sed -Ei 's/^ {4}//' "$HOME"/.config/"$progname"/squid.conf
+    echo "Restart squid with: podman restart $progname-squid"
+  fi
+}
+
+update_network_defs() {
+  # Create network definition for internal network
+  if [[ ! -e "$HOME"/.config/containers/systemd/"$progname"-internal.network ]]; then
+    {
+      printf '[Network]\n'
+      printf 'NetworkName=%s-internal\n' "$progname"
+      printf 'Subnet=192.0.2.0/24\n'
+      printf 'Internal=true\n'
+    } > "$HOME"/.config/containers/systemd/"$progname"-internal.network
+  fi
+
+  # Create network definition for egress network
+  if [[ ! -e "$HOME"/.config/containers/systemd/"$progname"-egress.network ]]; then
+    {
+      printf '[Network]\n'
+      printf 'NetworkName=%s-egress\n' "$progname"
+    } > "$HOME"/.config/containers/systemd/"$progname"-egress.network
+  fi
+}
+
 update_containerfile() {
   if [[ -e "$HOME"/.config/"$progname"/Containerfile ]]; then
     cp "$HOME"/.config/"$progname"/Containerfile "$HOME"/.config/"$progname"/Containerfile."$(date +"%Y%m%d-%H%M%S")"
@@ -96,6 +237,10 @@ usage() {
   echo "  -h      : this help text"
   echo "  -n NAME : Name for the sandbox (default: $sandbox_name)"
   echo "  -H HOME : Use a separate HOME directory for sandbox (default: ~/.local/share/$progname/homes/NAME)"
+  echo "  -C      : (re-)install ~/.config/$progname/Containerfile from template"
+  echo "  -N      : (re-)install network definition files from template"
+  echo "  -Q      : (re-)install quadlet/service file from template"
+  echo "  -S      : (re-)install squid config file from template"
   echo "  -b      : (re-)build the container"
   echo "  -c      : run with claude"
   echo "  -o      : run with opencode"
@@ -104,7 +249,6 @@ usage() {
   echo "  -r      : run bash shell as root in sandbox"
   echo "  -t      : run inside tmux"
   echo "  -T      : do not run inside tmux"
-  echo "  -C      : update ~/.config/$progname/Containerfile from template"
   echo "Default Agent: $default_agent"
   echo "Use tmux: $use_tmux"
   exit "${1:-0}"
@@ -114,11 +258,42 @@ agent=$default_agent
 build_only=false
 podman_args=()
 # shellcheck disable=2034
-while getopts ":hn:H:bcopsrtTC" opt; do
+while getopts ":hn:H:CNQSbcopsrtT" opt; do
   case $opt in
     n) sandbox_name=$OPTARG ;;
     H) sandbox_home=$OPTARG ;;
     b) build_only=true ;;
+    C) echo "Updating ~/.config/$progname/Containerfile from template"
+       if [[ -e "$HOME"/.config/"$progname"/Containerfile ]]; then
+         cp -p "$HOME"/.config/"$progname"/Containerfile "$HOME"/.config/"$progname"/Containerfile."$(date +"%Y%m%d-%H%M%S")"
+       fi
+       update_containerfile
+       exit ;;
+    N) echo "Updating container network defintion files from template"
+       if [[ -e "$HOME"/.config/containers/systemd/"$progname"-internal.network ]]; then
+         cp -p "$HOME"/.config/containers/systemd/"$progname"-internal.network \
+           "$HOME"/.config/containers/systemd/"$progname"-internal.network."$(date +"%Y%m%d-%H%M%S")"
+       fi
+       if [[ -e "$HOME"/.config/containers/systemd/"$progname"-egress.network ]]; then
+         cp -p "$HOME"/.config/containers/systemd/"$progname"-egress.network \
+           "$HOME"/.config/containers/systemd/"$progname"-egress.network."$(date +"%Y%m%d-%H%M%S")"
+       fi
+       update_network_defs
+       ;;
+    Q) echo "Updating ~/.config/systemd/user/$progname-squid.service from template"
+       if [[ -e "Updating ~/.config/systemd/user/$progname-squid.service from template" ]]; then
+         cp -p "$HOME"/.config/systemd/user/"$progname"-squid.service \
+           "$HOME"/.config/systemd/user/"$progname"-squid.service."$(date +"%Y%m%d-%H%M%S")"
+       fi
+       update_quadlet
+       update_service_files
+       ;;
+    S) echo "Updating ~/.config/$progname/squid.conf from template"
+       if [[ -e "$HOME"/.config/$progname/squid.conf ]]; then
+         cp -p "$HOME"/.config/$progname/squid.conf "$HOME"/.config/$progname/squid.conf."$(date +"%Y%m%d-%H%M%S")"
+       fi
+       update_squid_conf
+       exit ;;
     c) agent=claude ;;
     o) agent=opencode ;;
     p) agent=pi ;;
@@ -126,9 +301,6 @@ while getopts ":hn:H:bcopsrtTC" opt; do
     r) agent=bash ; podman_args+=(-u root) ;;
     t) use_tmux=true ;;
     T) use_tmux=false ;;
-    C) echo "Updating ~/.config/$progname/Containerfile from template"
-       update_containerfile
-       exit ;;
     h) usage ;;
     :) echo "-$OPTARG requires an argument" ; exit 1 ;;
     \?) echo "Unknown option: -$OPTARG" ; exit 1 ;;
@@ -193,148 +365,20 @@ fi
 if [[ "$(podman container inspect -f '{{.State.Running}}' "$progname"-squid 2>/dev/null)" != true ]]; then
   [[ ! -d "$HOME"/.config/"$progname" ]] && mkdir -p "$HOME"/.config/"$progname"
 
-  if [[ ! -e "$HOME"/.config/"$progname"/squid.conf ]]; then
-    # squid.conf contents - SECURITY HARDENED
-    cat <<EOF > "$HOME"/.config/"$progname"/squid.conf
-    acl agent_https_allowed dstdomain api.anthropic.com
-    acl agent_https_allowed dstdomain bridge.claudeusercontent.com
-    acl agent_https_allowed dstdomain claude.com
-    acl agent_https_allowed dstdomain code.claude.com
-    acl agent_https_allowed dstdomain downloads.claude.ai
-    acl agent_https_allowed dstdomain mcp-proxy.anthropic.com
-    acl agent_https_allowed dstdomain platform.claude.com
-    acl agent_https_allowed dstdomain models.dev
-    acl agent_https_allowed dstdomain .opencode.ai
-    acl agent_https_allowed dstdomain pi.dev
-    acl agent_https_allowed dstdomain registry.npmjs.org
-    acl agent_https_allowed dstdomain archive.ubuntu.com
-    acl agent_https_allowed dstdomain download.docker.com
-    
-    # acl agent_https_allowed dstdomain api.github.com
-    # acl agent_https_allowed dstdomain github.com
-
-    acl agent_src src 192.0.2.0/24
-    acl SSL_ports port 443
-    acl CONNECT method CONNECT
-
-    # Block all traffic except from internal network
-    http_access deny !agent_src
-    # Block non-HTTPS CONNECT requests
-    http_access deny CONNECT !SSL_ports
-    # Allow HTTPS CONNECT only to explicitly allowed domains
-    http_access allow CONNECT agent_https_allowed
-    # Block everything else
-    http_access deny all
-
-    # =============================================================================
-    # Additional hardening options
-    # =============================================================================
-    # Reject suspicious user agents
-    # http_access deny _SHOULD_RETRY
-    # http_access deny badreferer
-
-    # Disable dangerous features
-    http_access deny CONNECT !SSL_ports
-    
-    # Enable logging for audit trail (optional, uncomment if needed)
-    # access_log /var/log/squid/access.log
-    # cache_log /var/log/squid/cache.log
-
-    # Performance and resource limits
-    cache_mem 128MB
-    maximum_object_size_in_memory 8 MB
-    cache_mem 50MB
-
-    # Basic settings
-    http_port 3128
-    cache deny all
-    via off
-    forwarded_for delete
-
-    # Security headers
-    # reply_headers X-Content-Type-Options nosniff
-    # reply_headers X-Frame-Options DENY
-EOF
-    sed -Ei 's/^ {4}//' "$HOME"/.config/"$progname"/squid.conf
-    echo "Security-hardened Squid configuration created!"
-    echo "Key security features:"
-    echo "  - Only explicitly allowed domains can be accessed"
-    echo "  - GitHub is blocked by default (uncomment if needed)"
-    echo "  - Internal network isolation enforced"
-    echo "  - No-new-privileges and capability dropping in systemd service"
-    echo "  - Logging enabled for audit (optional)"
-    echo ""
-    echo "Then restart squid with: podman restart $progname-squid"
-  fi
+  # Create squid.conf file
+  update_squid_conf
 
   # Create systemd service for squid
   [[ ! -d ~/.config/containers/systemd ]] && mkdir -p ~/.config/containers/systemd
 
-  # Create network definition for internal network
-  if [[ ! -e "$HOME"/.config/containers/systemd/"$progname"-internal.network ]]; then
-    {
-      printf '[Network]\n'
-      printf 'NetworkName=%s-internal\n' "$progname"
-      printf 'Subnet=192.0.2.0/24\n'
-      printf 'Internal=true\n'
-    } > "$HOME"/.config/containers/systemd/"$progname"-internal.network
-  fi
-
-  # Create network definition for egress network
-  if [[ ! -e "$HOME"/.config/containers/systemd/"$progname"-egress.network ]]; then
-    {
-      printf '[Network]\n'
-      printf 'NetworkName=%s-egress\n' "$progname"
-    } > "$HOME"/.config/containers/systemd/"$progname"-egress.network
-  fi
+  # Create network definition files
+  update_network_defs
 
   # Create quadlet service definition for squid container
-  if [[ ! -e "$HOME"/.config/containers/systemd/"$progname"-squid.container ]]; then
-    {
-      printf '[Unit]\n'
-      printf 'Description=Squid egress proxy for %s sandboxes\n' "$progname"
-      printf 'After=%s-internal-network.service %s-egress-network.service\n' "$progname" "$progname"
-      printf 'Requires=%s-internal-network.service %s-egress-network.service\n' "$progname" "$progname"
-      printf 'Documentation=https://man.squid-cache.org/Doc/Config/\n'
-      printf '\n'
-      printf '[Container]\n'
-      printf 'ContainerName=%s-squid\n' "$progname"
-      printf 'Image=docker.io/ubuntu/squid:latest\n'
-      printf 'Network=%s-internal.network:ip=192.0.2.2\n' "$progname"
-      printf 'Network=%s-egress.network\n' "$progname"
-      printf 'Volume=%%h/.config/%s/squid.conf:/etc/squid/squid.conf:ro\n' "$progname"
-      printf 'ReadonlyRootFS=true\n'
-      printf 'NoNewPrivileges=true\n'
-      printf 'DropCapability=ALL\n'
-      printf 'AddCapability=SETUID SETGID CHOWN DAC_OVERRIDE\n'
-      printf 'Memory=50M\n'
-      printf 'MemorySwap=50M\n'
-      printf 'CpuShares=100\n'
-      printf 'CpuPeriod=10000\n'
-      printf 'PidsLimit=5\n'
-      printf 'SecurityProfile=docker-default\n'
-      printf '\n'
-      printf '[Service]\n'
-      printf 'Restart=on-failure\n'
-      printf 'RestartSec=10\n'
-      printf 'TimeoutStartSec=900\n'
-      printf 'TimeoutStopSec=30\n'
-      printf 'LimitNOFILE=65535\n'
-      printf 'LimitNPROC=1000\n'
-      printf '\n'
-      printf '[Install]\n'
-      printf 'WantedBy=default.target\n'
-    } > "$HOME"/.config/containers/systemd/"$progname"-squid.container
-  fi
-  echo "Squid systemd service updated with resource limits and hardening."
+  update_quadlet
 
   # Create systemd unit files for the podman objects
-  if [[ ! -e "$HOME"/.config/systemd/user/"$progname"-egress-network.service ||
-        ! -e "$HOME"/.config/systemd/user/"$progname"-internal-network.service ||
-        ! -e "$HOME"/.config/systemd/user/"$progname"-squid.service ]]; then
-    /usr/lib/systemd/system-generators/podman-system-generator --user "$HOME"/.config/systemd/user
-    systemctl --user daemon-reload
-  fi
+  update_service_files
 
   # Allow the process to start and run when user it not logged in
   loginctl enable-linger "$USER"
