@@ -167,8 +167,8 @@ update_containerfile() {
     RUN \
         . /etc/os-release \
         && apt-get update && apt-get install -y --no-install-recommends \
-            git ripgrep vim curl ca-certificates jq less procps openssh-client \
-            podman fuse-overlayfs uidmap slirp4netns locales tmux iproute2 \
+            podman git ripgrep fd vim nano curl ca-certificates jq less procps \
+            openssh-client fuse-overlayfs uidmap slirp4netns locales tmux iproute2 \
             dbus-bin python3 python3-venv python3-pip build-essential pkg-config \
             unzip zip xz-utils bzip2 shellcheck ncurses-term rsync file tree \
         && sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
