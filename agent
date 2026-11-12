@@ -160,36 +160,77 @@ update_containerfile() {
   if [[ -e "$HOME"/.config/"$progname"/Containerfile ]]; then
     cp "$HOME"/.config/"$progname"/Containerfile "$HOME"/.config/"$progname"/Containerfile."$(date +"%Y%m%d-%H%M%S")"
   fi
-  cat <<EOF > "$HOME"/.config/"$progname"/Containerfile
-    FROM docker.io/library/node:26-trixie-slim
-    ENV DEBIAN_FRONTEND=noninteractive
+  case "$AGENT_CONTAINER_BASE" in
+    archlinux)
+      cat <<EOF > "$HOME"/.config/"$progname"/Containerfile
+        FROM docker.io/archlinux/archlinux:latest
 
-    RUN \
-        . /etc/os-release \
-        && apt-get update && apt-get install -y --no-install-recommends \
-            podman git ripgrep fd vim nano curl ca-certificates jq less procps \
-            openssh-client fuse-overlayfs uidmap slirp4netns locales tmux iproute2 \
-            dbus-bin python3 python3-venv python3-pip build-essential pkg-config \
-            unzip zip xz-utils bzip2 shellcheck ncurses-term rsync file tree \
-        && sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
-        && locale-gen \
-        && rm -rf /var/lib/apt/lists/*
+        RUN dbus-uuidgen --ensure=/etc/machine-id \
+            && sed -ri 's/^#(en_US.U.*)$/\1/' /etc/locale.gen \
+            && locale-gen \
+            && echo 'LANG=en_US.UTF-8' >> /etc/locale.conf \
+            && useradd -m node
 
-    RUN npm install -g \
-          npm@12 \
-          @anthropic-ai/claude-code \
-          opencode-ai \
-          @rynfar/meridian \
-          opencode-with-claude && \
-        npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+        RUN . /etc/os-release \
+            && pacman -Syu --noconfirm \
+                podman ripgrep fd vim nano curl jq less procps psutils \
+                openssh dbus tmux iproute2 \
+                unzip zip xz bzip2 shellcheck rsync file tree \
+                base-devel go python3 nodejs npm lesspipe \
+                cargo rust clang lld zig github-cli glab tea forgejo-cli \
+                lazygit git subversion mercurial opencode \
+            && rm -Rf /var/cache/pacman/pkg
 
-    RUN dbus-uuidgen --ensure=/etc/machine-id
+        RUN npm install -g \
+              @anthropic-ai/claude-code \
+              @rynfar/meridian \
+              opencode-with-claude && \
+            npm install -g --ignore-scripts @earendil-works/pi-coding-agent @earendil-works/pi-ai
 
-    USER node
-    ENV HOME=/home/node
-    WORKDIR /workspace
+        USER node
+        ENV HOME=/home/node
+        WORKDIR /workspace
 EOF
-  sed -Ei 's/^ {4}//' "$HOME"/.config/"$progname"/Containerfile
+      ;;
+    debian)
+      cat <<EOF > "$HOME"/.config/"$progname"/Containerfile
+        FROM docker.io/library/node:26-trixie-slim
+        ENV DEBIAN_FRONTEND=noninteractive
+
+        RUN \
+            . /etc/os-release \
+            && apt-get update && apt-get install -y --no-install-recommends \
+                podman ripgrep fd-find vim nano curl ca-certificates jq less procps \
+                openssh-client dbus-bin fuse-overlayfs uidmap slirp4netns locales tmux iproute2 \
+                unzip zip xz-utils bzip2 shellcheck ncurses-term rsync file tree \
+                build-essential python3 python3-venv python3-pip pkg-config \
+                cargo rust-all clang lld gh glab tea-cli \
+                lazygit git subversion mercurial \
+            && sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
+            && locale-gen \
+            && rm -rf /var/lib/apt/lists/*
+
+        RUN npm install -g \
+              npm@12 \
+              @anthropic-ai/claude-code \
+              opencode-ai \
+              @rynfar/meridian \
+              opencode-with-claude && \
+            npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+
+        RUN dbus-uuidgen --ensure=/etc/machine-id
+
+        USER node
+        ENV HOME=/home/node
+        WORKDIR /workspace
+EOF
+      ;;
+    *)
+      echo "Error: container_base must be 'archlinux' or 'debian'" >&2
+      exit 1
+      ;;
+  esac
+  sed -Ei 's/^ {8}//' "$HOME"/.config/"$progname"/Containerfile
 }
 
 # Container build function to be called with -b or if the container does not exist
@@ -217,6 +258,10 @@ sandbox_home=
 agents=(claude opencode pi bash)
 default_agent=claude
 use_tmux=true
+#
+# If AGENT_CONTAINER_BASE not in environment, use archlinux
+: "${AGENT_CONTAINER_BASE:=archlinux}"
+
 # shellcheck disable=1090
 [[ -r "$HOME"/.config/"$progname"/config ]] && source "$HOME"/.config/"$progname"/config
 
