@@ -530,10 +530,10 @@ exec podman run -it --rm \
   --cap-drop=all \
   --read-only \
   --security-opt no-new-privileges \
-  --cpu-shares=512 \
-  --cpus=1.0 \
-  --memory=512m \
-  --memory-swap=512m \
+  --cpu-shares="${CPU_SHARES:-512}" \
+  --cpus="${CPUS:-1}".0 \
+  --memory="${MEMORY:-512m}" \
+  --memory-swap="${SWAP:-512m}" \
   --pids-limit=50 \
   --tmpfs /tmp:rw,noexec,nosuid,size=100m \
   --tmpfs /var/tmp:rw,noexec,nosuid,size=100m \
